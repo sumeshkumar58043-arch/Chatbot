@@ -1,8 +1,16 @@
+// Deprecated Groq models → current replacements (auto-migrated on load)
+const DEPRECATED_MODEL_MAP = {
+    'llama-3.3-70b-versatile': 'openai/gpt-oss-120b',
+    'llama-3.1-8b-instant': 'openai/gpt-oss-20b',
+    'mixtral-8x7b-32768': 'openai/gpt-oss-120b',
+    'qwen/qwen3.6-27b': 'qwen/qwen3.8-27b'
+};
+
 // Application State Management
 const STATE = {
     config: {
         groqApiKey: '',
-        groqModel: 'llama-3.3-70b-versatile',
+        groqModel: 'openai/gpt-oss-120b',
         ttsVoice: '',
         ttsRate: 1.1
     },
@@ -29,6 +37,8 @@ const elements = {
     closeModalBtn: document.getElementById('close-modal-btn'),
     saveSettingsBtn: document.getElementById('save-settings-btn'),
     apiKeyInput: document.getElementById('api-key-input'),
+    apiKeyStatus: document.getElementById('api-key-status'),
+    toggleApiKeyBtn: document.getElementById('toggle-api-key-btn'),
     modelSelect: document.getElementById('model-select'),
     voiceSelect: document.getElementById('voice-select'),
     voiceRate: document.getElementById('voice-rate'),
@@ -62,6 +72,63 @@ document.addEventListener('DOMContentLoaded', () => {
     initSpeechVoices();
 });
 
+// Migrate deprecated model IDs saved in localStorage
+function migrateDeprecatedModel(modelId) {
+    if (DEPRECATED_MODEL_MAP[modelId]) {
+        const replacement = DEPRECATED_MODEL_MAP[modelId];
+        console.warn(`Model "${modelId}" is deprecated. Migrating to "${replacement}".`);
+        return replacement;
+    }
+    return modelId;
+}
+
+// Clean pasted API keys (whitespace, quotes, invisible characters)
+function sanitizeApiKey(rawKey) {
+    return rawKey
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .replace(/^["']|["']$/g, '')
+        .trim();
+}
+
+// Groq keys always start with gsk_
+function isValidApiKeyFormat(key) {
+    return /^gsk_[A-Za-z0-9]{20,}$/.test(key);
+}
+
+// Verify key against Groq before saving
+async function testApiKey(key) {
+    const response = await fetch('https://api.groq.com/openai/v1/models', {
+        headers: { 'Authorization': `Bearer ${key}` }
+    });
+    if (response.ok) return { ok: true };
+    const message = await parseApiError(response);
+    return { ok: false, message };
+}
+
+// Parse Groq API error responses into a readable message
+async function parseApiError(response) {
+    try {
+        const data = await response.json();
+        if (data?.error?.message) {
+            return data.error.message;
+        }
+    } catch (_) {
+        // response body was not JSON
+    }
+    return `HTTP ${response.status}`;
+}
+
+// Ensure API key is configured before making requests
+function ensureApiKey() {
+    if (!STATE.config.groqApiKey) {
+        updateStatus('API key not configured. Open Settings to add your Groq key.');
+        updateStatusBadge('Needs API Key', 'pulsing-red');
+        elements.settingsModal.classList.add('open');
+        return false;
+    }
+    return true;
+}
+
 // Load Config from LocalStorage
 function loadConfig() {
     const savedConfig = localStorage.getItem('voice_chatbot_config');
@@ -71,6 +138,16 @@ function loadConfig() {
         } catch (e) {
             console.error('Failed to parse local configuration', e);
         }
+    }
+
+    const migratedModel = migrateDeprecatedModel(STATE.config.groqModel);
+    if (migratedModel !== STATE.config.groqModel) {
+        STATE.config.groqModel = migratedModel;
+        localStorage.setItem('voice_chatbot_config', JSON.stringify(STATE.config));
+    }
+
+    if (STATE.config.groqApiKey) {
+        STATE.config.groqApiKey = sanitizeApiKey(STATE.config.groqApiKey);
     }
     
     // Mask API Key in settings field
@@ -87,16 +164,40 @@ function loadConfig() {
     }
 }
 
-// Save Config to LocalStorage
-function saveConfig() {
-    const key = elements.apiKeyInput.value.trim();
+// Save Config to LocalStorage (validates key with Groq first)
+async function saveConfig() {
+    const key = sanitizeApiKey(elements.apiKeyInput.value);
+    elements.apiKeyInput.value = key;
+
     if (!key) {
-        alert('Please enter a valid Groq API key.');
+        setApiKeyStatus('Please enter your Groq API key.', 'error');
+        return;
+    }
+
+    if (!isValidApiKeyFormat(key)) {
+        setApiKeyStatus('Invalid format. Groq keys start with "gsk_" followed by letters and numbers.', 'error');
+        return;
+    }
+
+    elements.saveSettingsBtn.disabled = true;
+    elements.saveSettingsBtn.textContent = 'Verifying...';
+    setApiKeyStatus('Checking key with Groq...', 'pending');
+
+    const testResult = await testApiKey(key);
+    elements.saveSettingsBtn.disabled = false;
+    elements.saveSettingsBtn.textContent = 'Save Configuration';
+
+    if (!testResult.ok) {
+        setApiKeyStatus(
+            `${testResult.message}. Create a new key at console.groq.com/keys`,
+            'error'
+        );
+        updateStatusBadge('Invalid API Key', 'pulsing-red');
         return;
     }
     
     STATE.config.groqApiKey = key;
-    STATE.config.groqModel = elements.modelSelect.value;
+    STATE.config.groqModel = migrateDeprecatedModel(elements.modelSelect.value);
     STATE.config.ttsRate = parseFloat(elements.voiceRate.value);
     STATE.config.ttsVoice = elements.voiceSelect.value;
 
@@ -106,6 +207,13 @@ function saveConfig() {
     elements.settingsModal.classList.remove('open');
     updateStatusBadge('Ready', 'green');
     updateStatus('Configuration saved. Ready to record.');
+    setApiKeyStatus('', '');
+}
+
+function setApiKeyStatus(message, type) {
+    if (!elements.apiKeyStatus) return;
+    elements.apiKeyStatus.textContent = message;
+    elements.apiKeyStatus.className = 'api-key-status' + (type ? ` ${type}` : '');
 }
 
 // Update Status Badge UI
@@ -157,6 +265,14 @@ function setupEventListeners() {
     });
     
     elements.saveSettingsBtn.addEventListener('click', saveConfig);
+
+    if (elements.toggleApiKeyBtn) {
+        elements.toggleApiKeyBtn.addEventListener('click', () => {
+            const isPassword = elements.apiKeyInput.type === 'password';
+            elements.apiKeyInput.type = isPassword ? 'text' : 'password';
+            elements.toggleApiKeyBtn.textContent = isPassword ? 'Hide' : 'Show';
+        });
+    }
 
     elements.voiceRate.addEventListener('input', (e) => {
         elements.rateDisplay.textContent = `${e.target.value}x`;
@@ -249,26 +365,65 @@ function setupEventListeners() {
         if (e.key === 'Enter') handleTextInput();
     });
 
-    // Record Button Voice triggers (Click and Keypress hold)
-    elements.recordBtn.addEventListener('mousedown', () => {
+    // Record Button Voice triggers (Robust Mouse & Touch handling)
+    let interactStartTime = 0;
+
+    const handlePointerDown = (e) => {
+        if (e.type === 'mousedown' && e.button !== 0) return;
+        if (e.type === 'touchstart') e.preventDefault(); // Prevent simulated mouse events
+        
+        interactStartTime = Date.now();
+        if (STATE.isRecording && STATE.clickStartRecording) {
+            // Already toggle-recording, ignore down event, let end/click handle stopping
+            return;
+        }
         STATE.clickStartRecording = false;
         startVoiceCapture();
-    });
-    elements.recordBtn.addEventListener('mouseup', () => {
-        if (!STATE.clickStartRecording) stopVoiceCapture();
-    });
-    elements.recordBtn.addEventListener('mouseleave', () => {
-        if (STATE.isRecording && !STATE.clickStartRecording) stopVoiceCapture();
-    });
-    
-    // Support click toggle behavior as fallback
-    elements.recordBtn.addEventListener('click', () => {
-        if (!STATE.isRecording) {
-            STATE.clickStartRecording = true;
-            startVoiceCapture();
-        } else if (STATE.clickStartRecording) {
+    };
+
+    const handlePointerUp = (e) => {
+        if (e.type === 'touchend' || e.type === 'touchcancel') e.preventDefault();
+        
+        const interactDuration = Date.now() - interactStartTime;
+        if (STATE.isRecording && !STATE.clickStartRecording) {
+            if (interactDuration < 300 && e.type !== 'touchcancel' && e.type !== 'mouseleave') {
+                // Quick tap/click: wait for click event (desktop) or handle directly (mobile)
+                if (e.type === 'touchend') {
+                    STATE.clickStartRecording = true;
+                }
+            } else {
+                // Long press, stop voice capture
+                stopVoiceCapture();
+            }
+        } else if (STATE.isRecording && STATE.clickStartRecording && e.type === 'touchend') {
+            // Second tap on mobile to stop recording
             STATE.clickStartRecording = false;
             stopVoiceCapture();
+        }
+    };
+
+    // Mouse Events
+    elements.recordBtn.addEventListener('mousedown', handlePointerDown);
+    elements.recordBtn.addEventListener('mouseup', handlePointerUp);
+    elements.recordBtn.addEventListener('mouseleave', (e) => {
+        if (STATE.isRecording && !STATE.clickStartRecording) stopVoiceCapture();
+    });
+
+    // Touch Events
+    elements.recordBtn.addEventListener('touchstart', handlePointerDown, { passive: false });
+    elements.recordBtn.addEventListener('touchend', handlePointerUp, { passive: false });
+    elements.recordBtn.addEventListener('touchcancel', handlePointerUp, { passive: false });
+    
+    // Support click toggle behavior as fallback (mainly for desktop)
+    elements.recordBtn.addEventListener('click', (e) => {
+        const interactDuration = Date.now() - interactStartTime;
+        if (STATE.isRecording && STATE.clickStartRecording) {
+            // Already toggled on, so toggle off
+            STATE.clickStartRecording = false;
+            stopVoiceCapture();
+        } else if (interactDuration < 300) {
+            // Quick click on desktop, turn into toggle mode
+            STATE.clickStartRecording = true;
         }
     });
 
@@ -368,11 +523,7 @@ function stopVoiceCapture() {
 // ----------------------------------------------------
 
 async function processSpeechAudio(audioBlob) {
-    if (!STATE.config.groqApiKey) {
-        updateStatus('API key not configured.');
-        elements.settingsModal.classList.add('open');
-        return;
-    }
+    if (!ensureApiKey()) return;
 
     const duration = (Date.now() - STATE.recordingTimeStart) / 1000;
     if (duration < 0.5) {
@@ -403,7 +554,8 @@ async function processSpeechAudio(audioBlob) {
         });
 
         if (!response.ok) {
-            throw new Error(`STT API returns HTTP ${response.status}`);
+            const errorMsg = await parseApiError(response);
+            throw new Error(errorMsg);
         }
 
         const data = await response.json();
@@ -421,14 +573,17 @@ async function processSpeechAudio(audioBlob) {
 
     } catch (error) {
         console.error('Transcription API failure:', error);
-        updateStatus('Speech transcription failed. Please verify API Key.');
+        updateStatus(`Speech transcription failed: ${error.message}`);
         updateStatusBadge('Ready', 'green');
     }
 }
 
 async function queryLLMResponse(userMessageText) {
+    if (!ensureApiKey()) return;
+
     updateStatus('Generating response from assistant...');
     updateStatusBadge('Generating', 'green');
+    showTypingIndicator();
 
     // Save prompt to history state
     STATE.chatHistory.push({ role: 'user', content: userMessageText });
@@ -457,11 +612,18 @@ async function queryLLMResponse(userMessageText) {
         });
 
         if (!response.ok) {
-            throw new Error(`LLM API returns HTTP ${response.status}`);
+            const errorMsg = await parseApiError(response);
+            throw new Error(errorMsg);
         }
 
         const data = await response.json();
-        const responseText = data.choices[0].message.content.trim();
+        const responseText = data?.choices?.[0]?.message?.content?.trim();
+
+        if (!responseText) {
+            throw new Error('Empty response from assistant.');
+        }
+
+        removeTypingIndicator();
 
         // Save reply to history
         STATE.chatHistory.push({ role: 'assistant', content: responseText });
@@ -472,8 +634,15 @@ async function queryLLMResponse(userMessageText) {
 
     } catch (err) {
         console.error('LLM completion API failure:', err);
-        updateStatus('Failed to generate chat response. Verify API settings.');
-        updateStatusBadge('Ready', 'green');
+        removeTypingIndicator();
+        updateStatus(`Failed to generate response: ${err.message}`);
+        if (/invalid api key/i.test(err.message)) {
+            updateStatusBadge('Invalid API Key', 'pulsing-red');
+            setApiKeyStatus('Key rejected by Groq. Paste a new key from console.groq.com/keys', 'error');
+            elements.settingsModal.classList.add('open');
+        } else {
+            updateStatusBadge('Ready', 'green');
+        }
     }
 }
 
@@ -481,6 +650,7 @@ async function queryLLMResponse(userMessageText) {
 function handleTextInput() {
     const text = elements.chatInput.value.trim();
     if (!text) return;
+    if (!ensureApiKey()) return;
 
     elements.chatInput.value = '';
     
@@ -521,7 +691,29 @@ function formatChatText(text) {
     return formatted;
 }
 
+function showTypingIndicator() {
+    removeTypingIndicator();
+    const row = document.createElement('div');
+    row.classList.add('message-row', 'assistant', 'typing-indicator-row');
+    row.innerHTML = `
+        <div class="bubble typing-indicator">
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+            <span class="typing-dot"></span>
+        </div>
+    `;
+    elements.chatHistory.appendChild(row);
+    elements.chatHistory.scrollTop = elements.chatHistory.scrollHeight;
+}
+
+function removeTypingIndicator() {
+    const indicator = elements.chatHistory.querySelector('.typing-indicator-row');
+    if (indicator) indicator.remove();
+}
+
 function appendSpeechBubble(role, text) {
+    elements.welcomeCard.style.display = 'none';
+
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     
     const row = document.createElement('div');
@@ -561,16 +753,26 @@ function appendSpeechBubble(role, text) {
 // Audio Synthesis Playback Logic
 // ----------------------------------------------------
 
+// Strip markdown/code blocks so TTS reads natural speech
+function textForSpeech(text) {
+    return text
+        .replace(/```[\s\S]*?```/g, ' code block ')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/[#*_~>\[\]()]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 function speakResponseAudio(text) {
     if (STATE.isMuted || typeof speechSynthesis === 'undefined') {
-        updateStatus('Ready.');
+        updateStatus('Ready. Click Mic or hold Spacebar to speak.');
         updateStatusBadge('Ready', 'green');
         return;
     }
 
     window.speechSynthesis.cancel(); // Clear queued outputs
 
-    STATE.speechUtterance = new SpeechSynthesisUtterance(text);
+    STATE.speechUtterance = new SpeechSynthesisUtterance(textForSpeech(text));
     
     // Find matching custom voice
     const voices = window.speechSynthesis.getVoices();
