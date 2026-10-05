@@ -174,15 +174,19 @@
             <div class="modal-body">
                 <div class="form-group">
                     <label for="api-key-input">Groq API Key</label>
-                    <input type="password" id="api-key-input" placeholder="gsk_..." autocomplete="off">
-                    <span class="help-text">Your key remains entirely in your browser and is loaded directly to Groq.</span>
+                    <div class="api-key-row">
+                        <input type="password" id="api-key-input" placeholder="gsk_..." autocomplete="off" spellcheck="false">
+                        <button type="button" id="toggle-api-key-btn" class="secondary-button">Show</button>
+                    </div>
+                    <span id="api-key-status" class="api-key-status"></span>
+                    <span class="help-text">Get a free key at <a href="https://console.groq.com/keys" target="_blank" rel="noopener">console.groq.com/keys</a>. Your key stays in your browser only.</span>
                 </div>
                 <div class="form-group">
                     <label for="model-select">LLM Model</label>
                     <select id="model-select">
-                        <option value="llama-3.3-70b-versatile">Llama 3.3 70B Versatile (Fast & Smart)</option>
-                        <option value="mixtral-8x7b-32768">Mixtral 8x7B 32k (High Speed)</option>
-                        <option value="llama-3.1-8b-instant">Llama 3.1 8B Instant (Ultra-Low Latency)</option>
+                        <option value="openai/gpt-oss-120b">GPT-OSS 120B (Fast & Smart)</option>
+                        <option value="openai/gpt-oss-20b">GPT-OSS 20B (Ultra-Low Latency)</option>
+                        <option value="qwen/qwen3.8-27b">Qwen 3.8 27B (Preview)</option>
                     </select>
                 </div>
                 <div class="form-group">
