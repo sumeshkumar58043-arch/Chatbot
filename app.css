@@ -260,6 +260,31 @@ body {
     color: var(--text-secondary);
 }
 
+/* Typing indicator while waiting for LLM response */
+.typing-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 16px 22px;
+    min-width: 64px;
+}
+
+.typing-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent-purple);
+    animation: typing-bounce 1.4s infinite ease-in-out both;
+}
+
+.typing-dot:nth-child(1) { animation-delay: -0.32s; }
+.typing-dot:nth-child(2) { animation-delay: -0.16s; }
+
+@keyframes typing-bounce {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+}
+
 /* Speech indicator for assistant */
 .speech-indicator {
     display: inline-flex;
@@ -361,6 +386,9 @@ body {
     position: relative;
     z-index: 2;
     outline: none;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: none;
 }
 
 .record-button:hover {
@@ -446,6 +474,28 @@ body {
 .primary-button:hover {
     transform: translateY(-2px);
     box-shadow: 0 6px 20px rgba(58, 134, 200, 0.4);
+}
+
+.primary-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.secondary-button {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--panel-border);
+    color: var(--text-primary);
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: var(--transition-smooth);
+}
+
+.secondary-button:hover {
+    background: rgba(255, 255, 255, 0.1);
 }
 
 /* Fallback Keyboard UI Styling */
@@ -573,7 +623,14 @@ body {
     color: var(--text-secondary);
 }
 
+.api-key-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
 .form-group input[type="password"],
+.form-group input[type="text"],
 .form-group select {
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid var(--panel-border);
@@ -587,14 +644,37 @@ body {
 }
 
 .form-group input[type="password"]:focus,
+.form-group input[type="text"]:focus,
 .form-group select:focus {
     border-color: var(--accent-blue);
     background: rgba(255, 255, 255, 0.06);
 }
 
+.api-key-status {
+    font-size: 0.78rem;
+    min-height: 1em;
+}
+
+.api-key-status.error {
+    color: #ff6b6b;
+}
+
+.api-key-status.pending {
+    color: var(--accent-blue);
+}
+
 .help-text {
     font-size: 0.75rem;
     color: var(--text-secondary);
+}
+
+.help-text a {
+    color: var(--accent-blue);
+    text-decoration: none;
+}
+
+.help-text a:hover {
+    text-decoration: underline;
 }
 
 .range-values {
